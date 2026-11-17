@@ -198,7 +198,7 @@
   <div class="faq">
     <details><summary>¿Esto es asesoría legal?</summary><p>No. Es inteligencia de negocios y research. Cuando una pregunta cruza a terreno legal, te lo decimos y, si lo deseas, se atiende bajo un engagement legal aparte.</p></details>
     <details><summary>¿Usan IA? ¿Cómo sé que es confiable?</summary><p>Sí, para velocidad — y verificamos toda afirmación material contra fuentes. Te entregamos las fuentes para que audites. La IA nunca tiene la última palabra sobre un hecho.</p></details>
-    <details><summary>¿Qué pasa con mi información confidencial?</summary><p>NDA disponible. La data sensible no entra a modelos públicos; definimos qué información va a qué herramienta antes de empezar.</p></details>
+    <details><summary>¿Qué pasa con mi información confidencial?</summary><p>NDA disponible. Antes de empezar acordamos por escrito qué información se puede procesar y con qué herramientas; lo que no deba salir de tu control, no se procesa.</p></details>
     <details><summary>¿Trabajan con abogados y firmas?</summary><p>Sí. Hacemos research white-label que tu firma reviste con su nombre — el background y los landscapes que no puedes staffear eficientemente in-house.</p></details>
   </div>
 </div></section>
@@ -215,9 +215,11 @@
       <input id="email" name="email" type="email" required>
       <label for="decision">¿Qué decisión quieres aclarar?</label>
       <textarea id="decision" name="decision" placeholder="Ej.: estoy evaluando entrar al mercado X / firmar con Y / abrir en Z…"></textarea>
+      <input type="text" name="website" id="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;height:0;width:0;opacity:0">
       <button class="btn" type="submit">Solicitar claridad</button>
     </form>
-    <div id="formMsg">Gracias — recibimos tu solicitud. Te contactamos en breve.</div>
+    <div id="formErr" role="alert" style="display:none;margin-top:14px;padding:12px;border-radius:7px;background:#fbeeee;color:#8a1f1f;font-size:14px;text-align:center">No pudimos enviar tu solicitud. Escríbenos directo a <a href="mailto:admin@jrchfiducia.com">admin@jrchfiducia.com</a>.</div>
+    <div id="formMsg" role="status">Gracias — recibimos tu solicitud. Te contactamos en breve.</div>
     <p class="formnote">Respuesta típica en 1 día hábil · NDA disponible · No constituye asesoría legal.</p>
   </div>
 </div></section>
@@ -263,28 +265,40 @@
   "mainEntity":[
     {"@type":"Question","name":"¿Esto es asesoría legal?","acceptedAnswer":{"@type":"Answer","text":"No. Es inteligencia de negocios y research. Cuando una pregunta cruza a terreno legal, se atiende bajo un engagement legal aparte."}},
     {"@type":"Question","name":"¿Usan IA? ¿Cómo sé que es confiable?","acceptedAnswer":{"@type":"Answer","text":"Sí, para velocidad — y verificamos toda afirmación material contra fuentes, que se entregan para auditar."}},
-    {"@type":"Question","name":"¿Qué pasa con mi información confidencial?","acceptedAnswer":{"@type":"Answer","text":"NDA disponible. La data sensible no entra a modelos públicos."}},
+    {"@type":"Question","name":"¿Qué pasa con mi información confidencial?","acceptedAnswer":{"@type":"Answer","text":"NDA disponible. Antes de empezar acordamos por escrito qué información se puede procesar y con qué herramientas."}},
     {"@type":"Question","name":"¿Trabajan con abogados y firmas?","acceptedAnswer":{"@type":"Answer","text":"Sí. Research white-label que tu firma reviste con su nombre."}}
   ]
 }
 </script>
 <script>
-  // Captura de leads. Configurar LEAD_ENDPOINT (Supabase Edge Function -> tabla jrch_leads).
-  // Si queda vacío, hace fallback a mailto para no perder el lead.
-  const LEAD_ENDPOINT = ""; // p.ej. "https://<proj>.supabase.co/functions/v1/lead"
-  const CONTACT_EMAIL = "contacto@jrchfiducia.com"; // confirmar correo real
-  document.getElementById('leadForm').addEventListener('submit', async function(e){
+  // Captura de leads -> Supabase public.jrch_leads (RLS: anon insert-only; lectura bloqueada).
+  // La llave publishable es pública por diseño; no da acceso de lectura.
+  const LEAD_URL = "https://hjlxqkvuenuaweoqzkyg.supabase.co/rest/v1/jrch_leads";
+  const LEAD_KEY = "sb_publishable_zvmbHdtg0W6vsHUn0Ws0fw_LoiEvfxY";
+  const form = document.getElementById('leadForm');
+  form.addEventListener('submit', async function(e){
     e.preventDefault();
-    const data = {nombre:nombre.value, email:email.value, decision:decision.value, source:"landing-fiducia-intelligence"};
-    try{
-      if(LEAD_ENDPOINT){
-        await fetch(LEAD_ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
-      }else{
-        window.location.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Solicitud de claridad — '+data.nombre)}&body=${encodeURIComponent(data.decision+'\n\n'+data.email)}`;
-      }
-      document.getElementById('leadForm').style.display='none';
-      document.getElementById('formMsg').style.display='block';
-    }catch(err){ window.location.href = `mailto:${CONTACT_EMAIL}`; }
+    const err = document.getElementById('formErr'), ok = document.getElementById('formMsg');
+    err.style.display='none';
+    if (document.getElementById('website').value) { form.style.display='none'; ok.style.display='block'; return; } // bot
+    const btn = form.querySelector('button[type=submit]'); const label = btn.textContent;
+    btn.disabled = true; btn.textContent = "Enviando…";
+    const q = new URLSearchParams(location.search), utm = {};
+    ['utm_source','utm_medium','utm_campaign','utm_term','utm_content'].forEach(k=>{ if(q.get(k)) utm[k]=q.get(k); });
+    const lead = {
+      brand: "fiducia-intelligence", source: "landing-es", lead_type: "claridad",
+      name: document.getElementById('nombre').value.trim().slice(0,200),
+      email: document.getElementById('email').value.trim().slice(0,320),
+      payload: { decision: document.getElementById('decision').value.trim().slice(0,4000), lang: "es", page: location.href },
+      utm: utm, user_agent: navigator.userAgent.slice(0,500)
+    };
+    try {
+      const r = await fetch(LEAD_URL, { method:"POST", headers:{ "apikey":LEAD_KEY, "Content-Type":"application/json", "Prefer":"return=minimal" }, body:JSON.stringify(lead) });
+      if (!r.ok) throw new Error("HTTP "+r.status);
+      form.style.display='none'; ok.style.display='block';
+    } catch(x) {
+      err.style.display='block'; btn.disabled=false; btn.textContent=label;
+    }
   });
 </script>
 </body>
